@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arlo_assistant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arlo_assistant_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-arlo_assistant}
+    ports:
+      - "5434:5432"
+    volumes:
+      - assistant_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arlo_assistant}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "${API_PORT:-8002}:8002"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  assistant_pgdata:
