@@ -2,8 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.health_check import router as health_router
+from app.api.health_check import router as health_check_router
 from app.api.chat import router as chat_router
+from app.api.health import router as health_router
 from app.db.base import Base
 from app.db.engine import engine
 from app.db import models  # noqa: F401
@@ -32,5 +33,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Arlo Assistant", version="0.1.0", lifespan=lifespan)
-app.include_router(health_router)
+app.include_router(health_check_router)
 app.include_router(chat_router)
+app.include_router(health_router)
