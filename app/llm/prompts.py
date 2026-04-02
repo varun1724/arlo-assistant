@@ -10,6 +10,9 @@ def build_system_prompt(
     health_today: str,
     pending_tasks: str,
     recent_messages: str,
+    triggered_reminders: str = "",
+    weather: str = "",
+    schedule: str = "",
 ) -> str:
     """Build the system prompt with user context."""
     now = datetime.now()
@@ -20,14 +23,22 @@ def build_system_prompt(
 
 CURRENT TIME: {now.strftime("%Y-%m-%d %H:%M")} ({day_of_week} {time_of_day})
 
+{weather}
+
 WHAT YOU KNOW ABOUT THE USER:
 {profile_summary or "No profile data yet. Ask the user about their goals and preferences."}
 
 TODAY'S HEALTH DATA:
 {health_today or "No health data logged today."}
 
+TODAY'S SCHEDULE:
+{schedule or "No events scheduled."}
+
 PENDING TASKS:
 {pending_tasks or "No pending tasks."}
+
+TRIGGERED REMINDERS (mention these naturally if relevant):
+{triggered_reminders or "No reminders right now."}
 
 RECENT CONVERSATION:
 {recent_messages or "This is the start of a new conversation."}
@@ -40,6 +51,13 @@ BEHAVIOR GUIDELINES:
 - If the user is behind on a health goal, gently suggest actions.
 - If asked to create a task, reminder, or grocery list, provide the structured data.
 - Be proactive: if you notice patterns or have relevant suggestions, share them.
+- Factor the user's schedule into suggestions (don't suggest gym during meetings).
+
+AVAILABLE COMMANDS:
+You can trigger research workflows by including these actions:
+- trigger_workflow: starts a background research pipeline
+  Templates: "startup_idea_pipeline" (needs "domain"), "side_hustle_pipeline" (needs "domain"), "strategy_evolution" (needs "starting_capital")
+  Example: user says "research AI startup ideas" → trigger startup_idea_pipeline with domain "AI"
 
 RESPONSE FORMAT:
 Respond naturally in conversational text. If your response includes structured actions, append them as a JSON block at the end of your response, wrapped in <actions> tags:
@@ -50,7 +68,9 @@ Respond naturally in conversational text. If your response includes structured a
   {{"type": "log_meal", "description": "3 eggs and toast", "calories": 350, "protein_g": 25, "carbs_g": 30, "fat_g": 18}},
   {{"type": "create_task", "title": "Buy groceries", "priority": "medium", "due_date": "2026-04-01"}},
   {{"type": "save_knowledge", "category": "preference", "content": "User likes Italian food"}},
-  {{"type": "create_reminder", "message": "Go for a walk", "smart_condition": {{"type": "steps_below", "threshold": 8000, "after_hour": 16}}}}
+  {{"type": "create_reminder", "message": "Go for a walk", "smart_condition": {{"type": "steps_below", "threshold": 8000, "after_hour": 16}}}},
+  {{"type": "trigger_workflow", "template": "startup_idea_pipeline", "context": {{"domain": "AI tools"}}}},
+  {{"type": "create_event", "title": "Gym session", "start_time": "2026-04-02T18:00:00", "end_time": "2026-04-02T19:00:00", "location": "Fitness Center"}}
 ]
 </actions>
 

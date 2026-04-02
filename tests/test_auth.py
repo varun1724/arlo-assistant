@@ -4,7 +4,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_no_token_returns_403(unauthed_client):
     r = await unauthed_client.get("/chat/conversations")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 @pytest.mark.asyncio

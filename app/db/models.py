@@ -21,6 +21,17 @@ class UserRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AuthUserRow(Base):
+    __tablename__ = "auth_users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class UserProfileRow(Base):
     """Key-value store for everything Arlo knows about the user."""
     __tablename__ = "user_profile"
@@ -74,6 +85,8 @@ class HealthDailyRow(Base):
     fat_g: Mapped[float] = mapped_column(Float, default=0)
     water_oz: Mapped[float] = mapped_column(Float, default=0)
     sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resting_heart_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active_calories: Mapped[float | None] = mapped_column(Float, nullable=True)
     mood: Mapped[str | None] = mapped_column(String(32), nullable=True)  # great, good, okay, bad
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -206,4 +219,34 @@ class ReminderRow(Base):
     recurring: Mapped[str | None] = mapped_column(String(32), nullable=True)  # daily, weekly, monthly
     smart_condition: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # {"type": "steps_below", "threshold": 8000, "after_hour": 16}
     status: Mapped[str] = mapped_column(String(16), default="active")  # active, fired, dismissed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─── Integrations ───────────────────────────────────────
+
+class TriggeredWorkflowRow(Base):
+    __tablename__ = "triggered_workflows"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    template_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    runtime_workflow_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, running, succeeded, failed
+    result_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CalendarEventRow(Base):
+    __tablename__ = "calendar_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    recurring: Mapped[str | None] = mapped_column(String(16), nullable=True)  # daily, weekly, monthly
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

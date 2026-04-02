@@ -9,7 +9,6 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import HealthDailyRow, MealRow, WorkoutRow, GoalRow
-from app.services.chat_service import DEFAULT_USER_ID
 
 import logging
 
@@ -18,14 +17,14 @@ logger = logging.getLogger("arlo.assistant.health")
 
 # ─── Daily Health ────────────────────────────────────────
 
-async def get_or_create_daily(session: AsyncSession, target_date: date | None = None) -> HealthDailyRow:
+async def get_or_create_daily(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> HealthDailyRow:
     """Get or create today's health record."""
     if target_date is None:
         target_date = date.today()
 
     result = await session.execute(
         select(HealthDailyRow).where(
-            HealthDailyRow.user_id == DEFAULT_USER_ID,
+            HealthDailyRow.user_id == user_id,
             HealthDailyRow.date == target_date,
         )
     )
@@ -33,16 +32,16 @@ async def get_or_create_daily(session: AsyncSession, target_date: date | None = 
     if row:
         return row
 
-    row = HealthDailyRow(user_id=DEFAULT_USER_ID, date=target_date)
+    row = HealthDailyRow(user_id=user_id, date=target_date)
     session.add(row)
     await session.commit()
     await session.refresh(row)
     return row
 
 
-async def log_steps(session: AsyncSession, steps: int, target_date: date | None = None) -> HealthDailyRow:
+async def log_steps(session: AsyncSession, steps: int, target_date: date | None = None, *, user_id: uuid.UUID) -> HealthDailyRow:
     """Log step count for a day (replaces existing value)."""
-    daily = await get_or_create_daily(session, target_date)
+    daily = await get_or_create_daily(session, target_date, user_id=user_id)
     await session.execute(
         update(HealthDailyRow)
         .where(HealthDailyRow.id == daily.id)
@@ -53,12 +52,12 @@ async def log_steps(session: AsyncSession, steps: int, target_date: date | None 
     return daily
 
 
-async def update_daily_macros(session: AsyncSession, target_date: date | None = None) -> HealthDailyRow:
+async def update_daily_macros(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> HealthDailyRow:
     """Recalculate daily totals from all meals logged today."""
     if target_date is None:
         target_date = date.today()
 
-    daily = await get_or_create_daily(session, target_date)
+    daily = await get_or_create_daily(session, target_date, user_id=user_id)
 
     # Sum all meals for today
     result = await session.execute(
@@ -68,7 +67,7 @@ async def update_daily_macros(session: AsyncSession, target_date: date | None = 
             func.coalesce(func.sum(MealRow.carbs_g), 0),
             func.coalesce(func.sum(MealRow.fat_g), 0),
         ).where(
-            MealRow.user_id == DEFAULT_USER_ID,
+            MealRow.user_id == user_id,
             MealRow.date == target_date,
         )
     )
@@ -100,13 +99,15 @@ async def log_meal(
     fat_g: float = 0,
     meal_type: str = "other",
     target_date: date | None = None,
+    *,
+    user_id: uuid.UUID,
 ) -> MealRow:
     """Log a meal and update daily totals."""
     if target_date is None:
         target_date = date.today()
 
     row = MealRow(
-        user_id=DEFAULT_USER_ID,
+        user_id=user_id,
         date=target_date,
         meal_type=meal_type,
         description=description,
@@ -119,20 +120,20 @@ async def log_meal(
     await session.commit()
 
     # Update daily totals
-    await update_daily_macros(session, target_date)
+    await update_daily_macros(session, target_date, user_id=user_id)
 
     await session.refresh(row)
     return row
 
 
-async def get_meals(session: AsyncSession, target_date: date | None = None) -> list[MealRow]:
+async def get_meals(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> list[MealRow]:
     """Get all meals for a day."""
     if target_date is None:
         target_date = date.today()
 
     result = await session.execute(
         select(MealRow)
-        .where(MealRow.user_id == DEFAULT_USER_ID, MealRow.date == target_date)
+        .where(MealRow.user_id == user_id, MealRow.date == target_date)
         .order_by(MealRow.created_at.asc())
     )
     return list(result.scalars().all())
@@ -147,13 +148,15 @@ async def log_workout(
     duration_minutes: int | None = None,
     notes: str | None = None,
     target_date: date | None = None,
+    *,
+    user_id: uuid.UUID,
 ) -> WorkoutRow:
     """Log a workout."""
     if target_date is None:
         target_date = date.today()
 
     row = WorkoutRow(
-        user_id=DEFAULT_USER_ID,
+        user_id=user_id,
         date=target_date,
         workout_type=workout_type,
         exercises=exercises,
@@ -166,14 +169,14 @@ async def log_workout(
     return row
 
 
-async def get_workouts(session: AsyncSession, target_date: date | None = None) -> list[WorkoutRow]:
+async def get_workouts(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> list[WorkoutRow]:
     """Get all workouts for a day."""
     if target_date is None:
         target_date = date.today()
 
     result = await session.execute(
         select(WorkoutRow)
-        .where(WorkoutRow.user_id == DEFAULT_USER_ID, WorkoutRow.date == target_date)
+        .where(WorkoutRow.user_id == user_id, WorkoutRow.date == target_date)
         .order_by(WorkoutRow.created_at.asc())
     )
     return list(result.scalars().all())
@@ -181,20 +184,20 @@ async def get_workouts(session: AsyncSession, target_date: date | None = None) -
 
 # ─── Dashboard ───────────────────────────────────────────
 
-async def get_dashboard(session: AsyncSession, target_date: date | None = None) -> dict:
+async def get_dashboard(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> dict:
     """Get today's health dashboard with stats vs goals."""
     if target_date is None:
         target_date = date.today()
 
-    daily = await get_or_create_daily(session, target_date)
-    meals = await get_meals(session, target_date)
-    workouts = await get_workouts(session, target_date)
+    daily = await get_or_create_daily(session, target_date, user_id=user_id)
+    meals = await get_meals(session, target_date, user_id=user_id)
+    workouts = await get_workouts(session, target_date, user_id=user_id)
 
     # Get health goals
     goals = {}
     result = await session.execute(
         select(GoalRow).where(
-            GoalRow.user_id == DEFAULT_USER_ID,
+            GoalRow.user_id == user_id,
             GoalRow.category == "health",
             GoalRow.status == "active",
         )
@@ -211,6 +214,8 @@ async def get_dashboard(session: AsyncSession, target_date: date | None = None) 
         "fat_g": daily.fat_g,
         "water_oz": daily.water_oz,
         "sleep_hours": daily.sleep_hours,
+        "resting_heart_rate": daily.resting_heart_rate,
+        "active_calories": daily.active_calories,
         "mood": daily.mood,
         "meals_logged": len(meals),
         "workouts_logged": len(workouts),
@@ -222,7 +227,7 @@ async def get_dashboard(session: AsyncSession, target_date: date | None = None) 
     }
 
 
-async def get_weekly_summary(session: AsyncSession) -> dict:
+async def get_weekly_summary(session: AsyncSession, *, user_id: uuid.UUID) -> dict:
     """Get the past 7 days of health data."""
     from datetime import timedelta
     today = date.today()
@@ -231,7 +236,7 @@ async def get_weekly_summary(session: AsyncSession) -> dict:
     result = await session.execute(
         select(HealthDailyRow)
         .where(
-            HealthDailyRow.user_id == DEFAULT_USER_ID,
+            HealthDailyRow.user_id == user_id,
             HealthDailyRow.date >= week_ago,
             HealthDailyRow.date <= today,
         )
@@ -242,7 +247,7 @@ async def get_weekly_summary(session: AsyncSession) -> dict:
     # Count workouts this week
     workout_result = await session.execute(
         select(func.count()).select_from(WorkoutRow).where(
-            WorkoutRow.user_id == DEFAULT_USER_ID,
+            WorkoutRow.user_id == user_id,
             WorkoutRow.date >= week_ago,
         )
     )

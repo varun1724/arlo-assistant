@@ -1,6 +1,4 @@
-"""Chat API — async conversational interface."""
-
-from __future__ import annotations
+"""Chat API — async conversational interface with SSE support."""
 
 import asyncio
 import uuid
@@ -8,17 +6,18 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
-from app.core.security import verify_token
+from app.core.security import get_current_user
 from app.db.engine import get_db, async_session
 from app.services import chat_service
 
-router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(verify_token)])
+router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 class SendMessageRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=10000)
-    conversation_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None  # noqa: UP007 - Pydantic needs runtime type
 
 
 class MessageResponse(BaseModel):
@@ -33,17 +32,18 @@ async def send_message(
     body: SendMessageRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
 ):
     """Send a message. Returns immediately with a message_id.
     The response is processed in the background.
     Poll GET /chat/message/{id} for the response.
     """
     conversation_id, message_id = await chat_service.send_message(
-        db, body.conversation_id, body.text,
+        db, body.conversation_id, body.text, user_id=user_id,
     )
 
     # Process in background so the user isn't blocked
-    background_tasks.add_task(_process_in_background, message_id)
+    background_tasks.add_task(_process_in_background, message_id, user_id)
 
     return MessageResponse(
         message_id=message_id,
@@ -53,16 +53,17 @@ async def send_message(
     )
 
 
-async def _process_in_background(message_id: uuid.UUID):
+async def _process_in_background(message_id: uuid.UUID, user_id: uuid.UUID):
     """Process the message using a fresh DB session."""
     async with async_session() as session:
-        await chat_service.process_message(session, message_id)
+        await chat_service.process_message(session, message_id, user_id=user_id)
 
 
 @router.get("/message/{message_id}", response_model=MessageResponse)
 async def get_message(
     message_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
 ):
     """Get a message by ID. Check status: 'thinking' means still processing."""
     msg = await chat_service.get_message(db, message_id)
@@ -80,8 +81,9 @@ async def get_message(
 async def list_conversations(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
 ):
-    convos = await chat_service.get_conversations(db, limit=limit)
+    convos = await chat_service.get_conversations(db, limit=limit, user_id=user_id)
     return {
         "conversations": [
             {
@@ -100,6 +102,7 @@ async def list_conversations(
 async def get_conversation(
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
 ):
     messages = await chat_service.get_conversation_messages(db, conversation_id)
     return {
@@ -116,3 +119,32 @@ async def get_conversation(
         ],
         "count": len(messages),
     }
+
+
+@router.get("/message/{message_id}/stream")
+async def stream_message(
+    message_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user),
+):
+    """SSE stream that pushes updates until the message is complete.
+    Use this instead of polling GET /chat/message/{id}.
+    """
+    async def event_generator():
+        import json
+        while True:
+            async with async_session() as session:
+                msg = await chat_service.get_message(session, message_id)
+            if msg is None:
+                yield {"event": "error", "data": json.dumps({"error": "Message not found"})}
+                return
+            data = {
+                "message_id": str(msg.id),
+                "status": msg.status,
+                "content": msg.content,
+            }
+            yield {"event": "message", "data": json.dumps(data)}
+            if msg.status in ("complete", "error"):
+                return
+            await asyncio.sleep(1)
+
+    return EventSourceResponse(event_generator())

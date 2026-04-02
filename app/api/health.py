@@ -1,25 +1,25 @@
 """Health API — steps, meals, workouts, dashboard."""
 
-from __future__ import annotations
-
+import uuid
 from datetime import date
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import verify_token
+from app.core.security import get_current_user
 from app.db.engine import get_db
 from app.services import health_service
 
-router = APIRouter(prefix="/health", tags=["health"], dependencies=[Depends(verify_token)])
+router = APIRouter(prefix="/health", tags=["health"])
 
 
 # ─── Request models ──────────────────────────────────────
 
 class LogStepsRequest(BaseModel):
     steps: int = Field(..., ge=0)
-    date: date | None = None
+    date: Optional[date] = None
 
 
 class LogMealRequest(BaseModel):
@@ -29,27 +29,27 @@ class LogMealRequest(BaseModel):
     carbs_g: float = 0
     fat_g: float = 0
     meal_type: str = "other"
-    date: date | None = None
+    date: Optional[date] = None
 
 
 class LogWorkoutRequest(BaseModel):
     workout_type: str = Field(..., min_length=1)
-    exercises: dict | None = None
-    duration_minutes: int | None = None
-    notes: str | None = None
-    date: date | None = None
+    exercises: Optional[dict] = None
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
+    date: Optional[date] = None
 
 
 # ─── Endpoints ───────────────────────────────────────────
 
 @router.post("/steps")
-async def log_steps(body: LogStepsRequest, db: AsyncSession = Depends(get_db)):
-    daily = await health_service.log_steps(db, body.steps, body.date)
+async def log_steps(body: LogStepsRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
+    daily = await health_service.log_steps(db, body.steps, body.date, user_id=user_id)
     return {"date": daily.date.isoformat(), "steps": daily.steps}
 
 
 @router.post("/meals")
-async def log_meal(body: LogMealRequest, db: AsyncSession = Depends(get_db)):
+async def log_meal(body: LogMealRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     meal = await health_service.log_meal(
         db,
         description=body.description,
@@ -59,6 +59,7 @@ async def log_meal(body: LogMealRequest, db: AsyncSession = Depends(get_db)):
         fat_g=body.fat_g,
         meal_type=body.meal_type,
         target_date=body.date,
+        user_id=user_id,
     )
     return {
         "id": str(meal.id),
@@ -71,7 +72,7 @@ async def log_meal(body: LogMealRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/workouts")
-async def log_workout(body: LogWorkoutRequest, db: AsyncSession = Depends(get_db)):
+async def log_workout(body: LogWorkoutRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     workout = await health_service.log_workout(
         db,
         workout_type=body.workout_type,
@@ -79,6 +80,7 @@ async def log_workout(body: LogWorkoutRequest, db: AsyncSession = Depends(get_db
         duration_minutes=body.duration_minutes,
         notes=body.notes,
         target_date=body.date,
+        user_id=user_id,
     )
     return {
         "id": str(workout.id),
@@ -89,10 +91,11 @@ async def log_workout(body: LogWorkoutRequest, db: AsyncSession = Depends(get_db
 
 @router.get("/meals")
 async def get_meals(
-    target_date: date | None = Query(default=None),
+    target_date: Optional[date] = Query(default=None),
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
 ):
-    meals = await health_service.get_meals(db, target_date)
+    meals = await health_service.get_meals(db, target_date, user_id=user_id)
     return {
         "meals": [
             {
@@ -113,12 +116,13 @@ async def get_meals(
 
 @router.get("/dashboard")
 async def dashboard(
-    target_date: date | None = Query(default=None),
+    target_date: Optional[date] = Query(default=None),
     db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
 ):
-    return await health_service.get_dashboard(db, target_date)
+    return await health_service.get_dashboard(db, target_date, user_id=user_id)
 
 
 @router.get("/weekly")
-async def weekly_summary(db: AsyncSession = Depends(get_db)):
-    return await health_service.get_weekly_summary(db)
+async def weekly_summary(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
+    return await health_service.get_weekly_summary(db, user_id=user_id)

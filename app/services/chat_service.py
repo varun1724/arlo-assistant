@@ -16,7 +16,7 @@ from app.llm.extractors import extract_actions
 
 logger = logging.getLogger("arlo.assistant.chat")
 
-# Default user ID (single-user for now)
+# Legacy default user ID — used only as a fallback default parameter
 DEFAULT_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -24,6 +24,7 @@ async def send_message(
     session: AsyncSession,
     conversation_id: uuid.UUID | None,
     user_text: str,
+    user_id: uuid.UUID = DEFAULT_USER_ID,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Create a user message and queue an assistant response.
 
@@ -32,7 +33,7 @@ async def send_message(
     """
     # Get or create conversation
     if conversation_id is None:
-        conv = ConversationRow(user_id=DEFAULT_USER_ID, title=user_text[:100])
+        conv = ConversationRow(user_id=user_id, title=user_text[:100])
         session.add(conv)
         await session.commit()
         await session.refresh(conv)
@@ -64,6 +65,7 @@ async def send_message(
 async def process_message(
     session: AsyncSession,
     message_id: uuid.UUID,
+    user_id: uuid.UUID = DEFAULT_USER_ID,
 ) -> None:
     """Process a pending assistant message — build context, call Claude, extract actions."""
     msg = await session.get(MessageRow, message_id)
@@ -72,13 +74,19 @@ async def process_message(
 
     try:
         # Build context
-        profile_summary = await _get_profile_summary(session)
-        health_today = await _get_health_today(session)
-        pending_tasks = await _get_pending_tasks(session)
+        profile_summary = await _get_profile_summary(session, user_id)
+        health_today = await _get_health_today(session, user_id)
+        pending_tasks = await _get_pending_tasks(session, user_id)
         recent_messages = await _get_recent_messages(session, msg.conversation_id)
+        triggered_reminders = await _get_triggered_reminders(session, user_id)
+        weather = await _get_weather()
+        schedule = await _get_schedule(session, user_id)
 
         system_prompt = build_system_prompt(
             profile_summary, health_today, pending_tasks, recent_messages,
+            triggered_reminders=triggered_reminders,
+            weather=weather,
+            schedule=schedule,
         )
 
         # Get the user's message (the one before this assistant message)
@@ -101,7 +109,7 @@ async def process_message(
         clean_text, actions = extract_actions(response)
 
         # Process actions
-        await _process_actions(session, actions)
+        await _process_actions(session, actions, user_id)
 
         # Update message
         await session.execute(
@@ -139,10 +147,10 @@ async def get_message(session: AsyncSession, message_id: uuid.UUID) -> MessageRo
     return await session.get(MessageRow, message_id)
 
 
-async def get_conversations(session: AsyncSession, limit: int = 20) -> list[ConversationRow]:
+async def get_conversations(session: AsyncSession, limit: int = 20, user_id: uuid.UUID = DEFAULT_USER_ID) -> list[ConversationRow]:
     result = await session.execute(
         select(ConversationRow)
-        .where(ConversationRow.user_id == DEFAULT_USER_ID)
+        .where(ConversationRow.user_id == user_id)
         .order_by(ConversationRow.updated_at.desc())
         .limit(limit)
     )
@@ -163,10 +171,10 @@ async def get_conversation_messages(
 
 # ─── Private helpers ─────────────────────────────────────
 
-async def _get_profile_summary(session: AsyncSession) -> str:
+async def _get_profile_summary(session: AsyncSession, user_id: uuid.UUID) -> str:
     result = await session.execute(
         select(UserProfileRow)
-        .where(UserProfileRow.user_id == DEFAULT_USER_ID)
+        .where(UserProfileRow.user_id == user_id)
         .order_by(UserProfileRow.updated_at.desc())
         .limit(50)
     )
@@ -177,12 +185,12 @@ async def _get_profile_summary(session: AsyncSession) -> str:
     return "\n".join(lines)
 
 
-async def _get_health_today(session: AsyncSession) -> str:
+async def _get_health_today(session: AsyncSession, user_id: uuid.UUID) -> str:
     from datetime import date
     today = date.today()
     result = await session.execute(
         select(HealthDailyRow)
-        .where(HealthDailyRow.user_id == DEFAULT_USER_ID, HealthDailyRow.date == today)
+        .where(HealthDailyRow.user_id == user_id, HealthDailyRow.date == today)
     )
     row = result.scalars().first()
     if not row:
@@ -194,10 +202,10 @@ async def _get_health_today(session: AsyncSession) -> str:
     )
 
 
-async def _get_pending_tasks(session: AsyncSession) -> str:
+async def _get_pending_tasks(session: AsyncSession, user_id: uuid.UUID) -> str:
     result = await session.execute(
         select(TaskRow)
-        .where(TaskRow.user_id == DEFAULT_USER_ID, TaskRow.status == "todo")
+        .where(TaskRow.user_id == user_id, TaskRow.status == "todo")
         .order_by(TaskRow.priority.desc())
         .limit(10)
     )
@@ -223,14 +231,33 @@ async def _get_recent_messages(session: AsyncSession, conversation_id: uuid.UUID
     return "\n".join(lines)
 
 
-async def _process_actions(session: AsyncSession, actions: list[dict]) -> None:
+async def _get_triggered_reminders(session: AsyncSession, user_id: uuid.UUID) -> str:
+    from app.services.reminder_service import get_triggered_reminders
+    triggered = await get_triggered_reminders(session, user_id=user_id)
+    if not triggered:
+        return ""
+    lines = [f"- {r.message}" for r in triggered]
+    return "\n".join(lines)
+
+
+async def _get_weather() -> str:
+    from app.services.weather_service import get_weather_context
+    return await get_weather_context()
+
+
+async def _get_schedule(session: AsyncSession, user_id: uuid.UUID) -> str:
+    from app.services.calendar_service import get_schedule_context
+    return await get_schedule_context(session, user_id=user_id)
+
+
+async def _process_actions(session: AsyncSession, actions: list[dict], user_id: uuid.UUID) -> None:
     """Execute extracted actions from Claude's response."""
     for action in actions:
         action_type = action.get("type", "")
         try:
             if action_type == "profile_update":
                 row = UserProfileRow(
-                    user_id=DEFAULT_USER_ID,
+                    user_id=user_id,
                     category=action.get("category", "general"),
                     key=action.get("key", ""),
                     value=str(action.get("value", "")),
@@ -241,7 +268,7 @@ async def _process_actions(session: AsyncSession, actions: list[dict]) -> None:
             elif action_type == "log_meal":
                 from datetime import date
                 row = __import__("app.db.models", fromlist=["MealRow"]).MealRow(
-                    user_id=DEFAULT_USER_ID,
+                    user_id=user_id,
                     date=date.today(),
                     description=action.get("description", ""),
                     calories=action.get("calories", 0),
@@ -254,7 +281,7 @@ async def _process_actions(session: AsyncSession, actions: list[dict]) -> None:
             elif action_type == "create_task":
                 from app.db.models import TaskRow as TR
                 row = TR(
-                    user_id=DEFAULT_USER_ID,
+                    user_id=user_id,
                     title=action.get("title", ""),
                     priority=action.get("priority", "medium"),
                 )
@@ -266,7 +293,7 @@ async def _process_actions(session: AsyncSession, actions: list[dict]) -> None:
             elif action_type == "save_knowledge":
                 from app.db.models import KnowledgeRow
                 row = KnowledgeRow(
-                    user_id=DEFAULT_USER_ID,
+                    user_id=user_id,
                     category=action.get("category", "fact"),
                     content=action.get("content", ""),
                 )
@@ -275,9 +302,31 @@ async def _process_actions(session: AsyncSession, actions: list[dict]) -> None:
             elif action_type == "create_reminder":
                 from app.db.models import ReminderRow
                 row = ReminderRow(
-                    user_id=DEFAULT_USER_ID,
+                    user_id=user_id,
                     message=action.get("message", ""),
                     smart_condition=action.get("smart_condition"),
+                )
+                session.add(row)
+
+            elif action_type == "trigger_workflow":
+                from app.services.runtime_service import trigger_workflow
+                await trigger_workflow(
+                    session,
+                    template_id=action.get("template", ""),
+                    context=action.get("context", {}),
+                    user_id=user_id,
+                )
+
+            elif action_type == "create_event":
+                from app.db.models import CalendarEventRow
+                from datetime import datetime as dt
+                row = CalendarEventRow(
+                    user_id=user_id,
+                    title=action.get("title", ""),
+                    start_time=dt.fromisoformat(action["start_time"]) if action.get("start_time") else dt.now(),
+                    end_time=dt.fromisoformat(action["end_time"]) if action.get("end_time") else None,
+                    location=action.get("location"),
+                    description=action.get("description"),
                 )
                 session.add(row)
 
