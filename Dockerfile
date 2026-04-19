@@ -17,12 +17,6 @@ RUN pip install --no-cache-dir .
 
 COPY app/ app/
 
-# Non-root user for Claude Code CLI
-RUN useradd -m -s /bin/bash arlo
-
 EXPOSE 8002
 
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-ENTRYPOINT ["entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]
