@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ConversationRow, MessageRow, UserProfileRow, HealthDailyRow, TaskRow
+from app.db.models import ConversationRow, MessageRow, UserProfileRow, HealthDailyRow, TaskRow, GoalRow, GroceryListRow, RecipeRow
 from app.llm.claude import chat_with_claude, ClaudeError
 from app.llm.prompts import build_system_prompt
 from app.llm.extractors import extract_actions
@@ -81,12 +81,18 @@ async def process_message(
         triggered_reminders = await _get_triggered_reminders(session, user_id)
         weather = await _get_weather()
         schedule = await _get_schedule(session, user_id)
+        goals_context = await _get_goals_context(session, user_id)
+        grocery_context = await _get_grocery_context(session, user_id)
+        recipe_context = await _get_recipe_context(session, user_id)
 
         system_prompt = build_system_prompt(
             profile_summary, health_today, pending_tasks, recent_messages,
             triggered_reminders=triggered_reminders,
             weather=weather,
             schedule=schedule,
+            goals_context=goals_context,
+            grocery_context=grocery_context,
+            recipe_context=recipe_context,
         )
 
         # Get the user's message (the one before this assistant message)
@@ -250,6 +256,58 @@ async def _get_schedule(session: AsyncSession, user_id: uuid.UUID) -> str:
     return await get_schedule_context(session, user_id=user_id)
 
 
+async def _get_goals_context(session: AsyncSession, user_id: uuid.UUID) -> str:
+    from datetime import date
+    today = date.today()
+    result = await session.execute(
+        select(GoalRow).where(GoalRow.user_id == user_id, GoalRow.status == "active")
+    )
+    goals = result.scalars().all()
+
+    # Get today's logged macros for remaining budget
+    daily_result = await session.execute(
+        select(HealthDailyRow).where(HealthDailyRow.user_id == user_id, HealthDailyRow.date == today)
+    )
+    daily = daily_result.scalars().first()
+    logged_protein = daily.protein_g if daily else 0
+    logged_calories = daily.calories if daily else 0
+
+    # Build goals string with remaining
+    lines = []
+    for g in goals:
+        lines.append(f"- {g.title}: {g.target_value}{g.unit} (current: {g.current_value})")
+
+    # Always show macro budget
+    lines.append(f"- Protein today: {logged_protein:.0f}g logged, {200 - logged_protein:.0f}g remaining to hit 200g target")
+    lines.append(f"- Calories today: {logged_calories:.0f} kcal logged, {3000 - logged_calories:.0f} kcal remaining to hit 3000 kcal target")
+    return "\n".join(lines) if lines else ""
+
+
+async def _get_grocery_context(session: AsyncSession, user_id: uuid.UUID) -> str:
+    result = await session.execute(
+        select(GroceryListRow).where(GroceryListRow.user_id == user_id).limit(1)
+    )
+    grocery = result.scalars().first()
+    if not grocery or not grocery.items:
+        return ""
+    unchecked = [
+        item.get("item", "") for item in grocery.items
+        if not item.get("checked", False) and item.get("item")
+    ][:12]
+    return ", ".join(unchecked) if unchecked else ""
+
+
+async def _get_recipe_context(session: AsyncSession, user_id: uuid.UUID) -> str:
+    result = await session.execute(
+        select(RecipeRow).where(RecipeRow.user_id == user_id).limit(6)
+    )
+    recipes = result.scalars().all()
+    if not recipes:
+        return ""
+    lines = [f"{r.name} ({int(r.protein_g)}g P, {int(r.calories)} kcal)" for r in recipes]
+    return ", ".join(lines)
+
+
 async def _process_actions(session: AsyncSession, actions: list[dict], user_id: uuid.UUID) -> None:
     """Execute extracted actions from Claude's response."""
     for action in actions:
@@ -316,6 +374,20 @@ async def _process_actions(session: AsyncSession, actions: list[dict], user_id: 
                     context=action.get("context", {}),
                     user_id=user_id,
                 )
+
+            elif action_type == "generate_meal_plan":
+                import json as _json
+                from datetime import date
+                from app.db.models import KnowledgeRow
+                plan_data = action.get("plan", {})
+                plan_data["date"] = date.today().isoformat()
+                row = KnowledgeRow(
+                    user_id=user_id,
+                    category="meal_plan",
+                    content=_json.dumps(plan_data),
+                    tags={"date": date.today().isoformat()},
+                )
+                session.add(row)
 
             elif action_type == "create_event":
                 from app.db.models import CalendarEventRow

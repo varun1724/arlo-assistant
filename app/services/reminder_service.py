@@ -22,6 +22,7 @@ async def create_reminder(
     remind_at: Optional[datetime] = None,
     recurring: Optional[str] = None,
     smart_condition: Optional[dict] = None,
+    source: Optional[str] = None,
     *,
     user_id: uuid.UUID,
 ) -> ReminderRow:
@@ -32,6 +33,11 @@ async def create_reminder(
         recurring=recurring,
         smart_condition=smart_condition,
     )
+    # Store source tag in smart_condition for idempotency checks
+    if source and row.smart_condition is None:
+        row.smart_condition = {"source": source}
+    elif source and row.smart_condition is not None:
+        row.smart_condition = {**row.smart_condition, "source": source}
     session.add(row)
     await session.commit()
     await session.refresh(row)
@@ -101,7 +107,6 @@ async def fire_reminders(session: AsyncSession, *, user_id: uuid.UUID) -> list[R
     for r in triggered:
         if r.recurring:
             # Recurring: mark as fired, it will reset on next check cycle
-            # For now just collect it — the prompt injection handles display
             fired.append(r)
         else:
             r.status = "fired"
@@ -113,6 +118,104 @@ async def fire_reminders(session: AsyncSession, *, user_id: uuid.UUID) -> list[R
     return fired
 
 
+async def seed_default_reminders(session: AsyncSession, *, user_id: uuid.UUID) -> list[ReminderRow]:
+    """Seed default daily reminders for a new user. Idempotent."""
+    # Check if already seeded
+    existing = await get_reminders(session, status="active", user_id=user_id)
+    seeded_sources = set()
+    for r in existing:
+        if r.smart_condition and r.smart_condition.get("source", "").startswith("default_"):
+            seeded_sources.add(r.smart_condition["source"])
+
+    defaults = [
+        {
+            "source": "default_morning",
+            "message": "Good morning — ready to start your day?",
+            "smart_condition": {"type": "time_of_day", "after_hour": 7, "before_hour": 10, "source": "default_morning"},
+            "recurring": "daily",
+        },
+        {
+            "source": "default_breakfast",
+            "message": "Time for breakfast — what's the plan?",
+            "smart_condition": {
+                "type": "no_meal_logged",
+                "meal_type": "breakfast",
+                "after_hour": 7,
+                "before_hour": 11,
+                "source": "default_breakfast",
+            },
+            "recurring": "daily",
+        },
+        {
+            "source": "default_lunch",
+            "message": "Lunch time — log it or get a suggestion",
+            "smart_condition": {
+                "type": "no_meal_logged",
+                "meal_type": "lunch",
+                "after_hour": 11,
+                "before_hour": 15,
+                "source": "default_lunch",
+            },
+            "recurring": "daily",
+        },
+        {
+            "source": "default_snack",
+            "message": "Protein snack time — keep hitting that 200g target",
+            "smart_condition": {
+                "type": "no_meal_logged",
+                "meal_type": "snack",
+                "after_hour": 14,
+                "before_hour": 17,
+                "source": "default_snack",
+            },
+            "recurring": "daily",
+        },
+        {
+            "source": "default_dinner",
+            "message": "Dinner plan? Log it or get ideas",
+            "smart_condition": {
+                "type": "no_meal_logged",
+                "meal_type": "dinner",
+                "after_hour": 17,
+                "before_hour": 21,
+                "source": "default_dinner",
+            },
+            "recurring": "daily",
+        },
+        {
+            "source": "default_steps",
+            "message": "Step check — worth a walk before the day ends?",
+            "smart_condition": {
+                "type": "steps_below",
+                "threshold": 8000,
+                "after_hour": 20,
+                "source": "default_steps",
+            },
+            "recurring": "daily",
+        },
+    ]
+
+    created = []
+    for d in defaults:
+        if d["source"] in seeded_sources:
+            continue
+        row = ReminderRow(
+            user_id=user_id,
+            message=d["message"],
+            recurring=d["recurring"],
+            smart_condition=d["smart_condition"],
+        )
+        session.add(row)
+        created.append(row)
+
+    if created:
+        await session.commit()
+        for row in created:
+            await session.refresh(row)
+
+    return created
+
+
 async def _evaluate_condition(
     session: AsyncSession, condition: dict, today: date, now: datetime, *, user_id: uuid.UUID
 ) -> bool:
@@ -120,12 +223,21 @@ async def _evaluate_condition(
     ctype = condition.get("type", "")
     current_hour = now.hour
 
-    # Check "after" time gate
+    # "after_hour" gate — don't fire before this hour
     after_hour = condition.get("after_hour")
     if after_hour is not None and current_hour < after_hour:
         return False
 
-    if ctype == "steps_below":
+    # "before_hour" gate — don't fire after this hour
+    before_hour = condition.get("before_hour")
+    if before_hour is not None and current_hour >= before_hour:
+        return False
+
+    if ctype == "time_of_day":
+        # Fires once per day in the configured window
+        return True
+
+    elif ctype == "steps_below":
         threshold = condition.get("threshold", 5000)
         result = await session.execute(
             select(HealthDailyRow).where(
@@ -139,12 +251,15 @@ async def _evaluate_condition(
 
     elif ctype == "no_meal_logged":
         from app.db.models import MealRow
-        result = await session.execute(
-            select(MealRow).where(
-                MealRow.user_id == user_id,
-                MealRow.created_at >= datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc),
-            ).limit(1)
+        meal_type = condition.get("meal_type")
+        q = select(MealRow).where(
+            MealRow.user_id == user_id,
+            MealRow.date == today,
         )
+        if meal_type:
+            q = q.where(MealRow.meal_type == meal_type)
+        q = q.limit(1)
+        result = await session.execute(q)
         if result.scalars().first() is None:
             return True
 

@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import HealthDailyRow, MealRow, WorkoutRow, GoalRow
+from app.db.models import HealthDailyRow, MealRow, WorkoutRow, GoalRow, KnowledgeRow, UserProfileRow, GroceryListRow, RecipeRow
 
 import logging
 
@@ -225,6 +225,151 @@ async def get_dashboard(session: AsyncSession, target_date: date | None = None, 
         ],
         "goals": goals,
     }
+
+
+async def get_or_generate_meal_plan(
+    session: AsyncSession,
+    target_date: date | None = None,
+    *,
+    user_id: uuid.UUID,
+) -> dict:
+    """Return today's meal plan from cache or generate via Claude."""
+    if target_date is None:
+        target_date = date.today()
+    date_str = target_date.isoformat()
+
+    # Check cache first
+    cached = await session.execute(
+        select(KnowledgeRow).where(
+            KnowledgeRow.user_id == user_id,
+            KnowledgeRow.category == "meal_plan",
+            KnowledgeRow.tags["date"].astext == date_str,
+        ).limit(1)
+    )
+    row = cached.scalars().first()
+    if row:
+        import json as _json
+        try:
+            return _json.loads(row.content)
+        except Exception:
+            pass
+
+    # Generate via Claude
+    plan = await _generate_meal_plan_via_claude(session, target_date, user_id=user_id)
+
+    # Cache it
+    import json as _json
+    knowledge = KnowledgeRow(
+        user_id=user_id,
+        category="meal_plan",
+        content=_json.dumps(plan),
+        tags={"date": date_str},
+    )
+    session.add(knowledge)
+    await session.commit()
+    return plan
+
+
+async def _generate_meal_plan_via_claude(
+    session: AsyncSession,
+    target_date: date,
+    *,
+    user_id: uuid.UUID,
+) -> dict:
+    """Ask Claude to generate a meal plan for the day based on user goals."""
+    import json as _json
+
+    # Gather context
+    daily = await get_or_create_daily(session, target_date, user_id=user_id)
+    already_logged_protein = daily.protein_g
+    already_logged_calories = daily.calories
+
+    # Get user goals
+    goals_result = await session.execute(
+        select(GoalRow).where(
+            GoalRow.user_id == user_id,
+            GoalRow.status == "active",
+        )
+    )
+    goals = {g.title: f"{g.target_value}{g.unit}" for g in goals_result.scalars().all()}
+    protein_goal = goals.get("Daily Protein", "200g")
+    calorie_goal = goals.get("Daily Calories", "3000kcal")
+
+    # Get dietary preferences from profile
+    prefs_result = await session.execute(
+        select(UserProfileRow).where(
+            UserProfileRow.user_id == user_id,
+            UserProfileRow.category == "nutrition",
+        )
+    )
+    prefs = {p.key: p.value for p in prefs_result.scalars().all()}
+    dietary_notes = prefs.get("dietary_preferences", "none specified")
+
+    # Get active grocery list items (first list)
+    grocery_result = await session.execute(
+        select(GroceryListRow).where(GroceryListRow.user_id == user_id).limit(1)
+    )
+    grocery = grocery_result.scalars().first()
+    grocery_items = []
+    if grocery and grocery.items:
+        grocery_items = [
+            item.get("item", "") for item in grocery.items
+            if not item.get("checked", False)
+        ][:10]
+
+    # Get saved recipes for reference
+    recipes_result = await session.execute(
+        select(RecipeRow).where(RecipeRow.user_id == user_id).limit(5)
+    )
+    recipe_names = [r.name for r in recipes_result.scalars().all()]
+
+    prompt = f"""Generate a meal plan for today ({target_date.isoformat()}) for a person focused on muscle gain.
+
+Daily targets:
+- Protein: {protein_goal}
+- Calories: {calorie_goal}
+- Already logged today: {already_logged_protein:.0f}g protein, {already_logged_calories:.0f} kcal
+
+Dietary preferences/restrictions: {dietary_notes}
+Available groceries (prefer these): {', '.join(grocery_items) if grocery_items else 'not specified'}
+Saved recipes to consider: {', '.join(recipe_names) if recipe_names else 'none saved yet'}
+
+Respond ONLY with a valid JSON object (no markdown, no explanation) in this exact format:
+{{
+  "date": "{target_date.isoformat()}",
+  "breakfast": {{"name": "...", "calories": 0, "protein_g": 0}},
+  "lunch": {{"name": "...", "calories": 0, "protein_g": 0}},
+  "dinner": {{"name": "...", "calories": 0, "protein_g": 0}},
+  "snacks": [{{"name": "...", "calories": 0, "protein_g": 0}}],
+  "total_calories": 0,
+  "total_protein_g": 0
+}}
+
+Make meal suggestions practical, high-protein, and specific. Include estimated macros."""
+
+    from app.llm.claude import chat_with_claude, ClaudeError
+    try:
+        raw = await chat_with_claude(prompt, timeout=60)
+        # Strip markdown fences if present
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        plan = _json.loads(raw.strip())
+        plan["date"] = target_date.isoformat()
+        return plan
+    except (ClaudeError, _json.JSONDecodeError, Exception):
+        # Fallback: return a simple default plan
+        return {
+            "date": target_date.isoformat(),
+            "breakfast": {"name": "Greek yogurt + oats + protein powder", "calories": 550, "protein_g": 45},
+            "lunch": {"name": "Chicken breast + rice + broccoli", "calories": 750, "protein_g": 55},
+            "dinner": {"name": "Salmon + sweet potato + vegetables", "calories": 850, "protein_g": 50},
+            "snacks": [{"name": "Cottage cheese + fruit", "calories": 300, "protein_g": 25}],
+            "total_calories": 2450,
+            "total_protein_g": 175,
+        }
 
 
 async def get_weekly_summary(session: AsyncSession, *, user_id: uuid.UUID) -> dict:

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import AuthUserRow, UserRow
+from app.services import reminder_service
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -60,6 +61,9 @@ async def register(session: AsyncSession, email: str, password: str, name: str =
     session.add(auth_user)
     await session.commit()
     await session.refresh(user)
+
+    # Seed default daily reminders for new user
+    await reminder_service.seed_default_reminders(session, user_id=user.id)
 
     return user, create_tokens(user.id)
 

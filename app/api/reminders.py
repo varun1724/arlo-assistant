@@ -64,6 +64,13 @@ async def delete_reminder(reminder_id: uuid.UUID, db: AsyncSession = Depends(get
     return {"deleted": True}
 
 
+@router.post("/seed-defaults", status_code=201)
+async def seed_default_reminders(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
+    """Seed default meal + health reminders. Idempotent — skips already-seeded ones."""
+    created = await reminder_service.seed_default_reminders(db, user_id=user_id)
+    return {"created": len(created), "reminders": [_reminder_response(r) for r in created]}
+
+
 def _reminder_response(r) -> dict:
     return {
         "id": str(r.id),

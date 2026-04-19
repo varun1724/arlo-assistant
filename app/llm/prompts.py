@@ -13,6 +13,9 @@ def build_system_prompt(
     triggered_reminders: str = "",
     weather: str = "",
     schedule: str = "",
+    goals_context: str = "",
+    grocery_context: str = "",
+    recipe_context: str = "",
 ) -> str:
     """Build the system prompt with user context."""
     now = datetime.now()
@@ -28,8 +31,15 @@ CURRENT TIME: {now.strftime("%Y-%m-%d %H:%M")} ({day_of_week} {time_of_day})
 WHAT YOU KNOW ABOUT THE USER:
 {profile_summary or "No profile data yet. Ask the user about their goals and preferences."}
 
+DAILY TARGETS:
+{goals_context or "- Protein: 200g\n- Calories: 3000 kcal\n- Steps: 8000\n- Workouts: 5/week"}
+
 TODAY'S HEALTH DATA:
 {health_today or "No health data logged today."}
+
+{f"ON HAND (grocery/pantry items): {grocery_context}" if grocery_context else ""}
+
+{f"SAVED RECIPES TO SUGGEST: {recipe_context}" if recipe_context else ""}
 
 TODAY'S SCHEDULE:
 {schedule or "No events scheduled."}
@@ -45,13 +55,14 @@ RECENT CONVERSATION:
 
 BEHAVIOR GUIDELINES:
 - Be concise and helpful. Don't over-explain.
+- When the user asks what to eat, suggest meals that match remaining macro budget. Prefer groceries on hand.
 - If the user mentions food, estimate macros (calories, protein, carbs, fat) and note them.
 - If the user mentions a goal or preference, note it for their profile.
 - If the user asks you to remember something, save it.
-- If the user is behind on a health goal, gently suggest actions.
+- If the user is behind on a health goal (especially protein), proactively flag it and suggest fixes.
 - If asked to create a task, reminder, or grocery list, provide the structured data.
-- Be proactive: if you notice patterns or have relevant suggestions, share them.
 - Factor the user's schedule into suggestions (don't suggest gym during meetings).
+- When logging meals, always estimate macros even if the user doesn't provide them.
 
 AVAILABLE COMMANDS:
 You can trigger research workflows by including these actions:
@@ -70,7 +81,8 @@ Respond naturally in conversational text. If your response includes structured a
   {{"type": "save_knowledge", "category": "preference", "content": "User likes Italian food"}},
   {{"type": "create_reminder", "message": "Go for a walk", "smart_condition": {{"type": "steps_below", "threshold": 8000, "after_hour": 16}}}},
   {{"type": "trigger_workflow", "template": "startup_idea_pipeline", "context": {{"domain": "AI tools"}}}},
-  {{"type": "create_event", "title": "Gym session", "start_time": "2026-04-02T18:00:00", "end_time": "2026-04-02T19:00:00", "location": "Fitness Center"}}
+  {{"type": "create_event", "title": "Gym session", "start_time": "2026-04-02T18:00:00", "end_time": "2026-04-02T19:00:00", "location": "Fitness Center"}},
+  {{"type": "generate_meal_plan", "plan": {{"breakfast": {{"name": "...", "calories": 0, "protein_g": 0}}, "lunch": {{"name": "...", "calories": 0, "protein_g": 0}}, "dinner": {{"name": "...", "calories": 0, "protein_g": 0}}, "snacks": []}}}}
 ]
 </actions>
 

@@ -126,3 +126,13 @@ async def dashboard(
 @router.get("/weekly")
 async def weekly_summary(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     return await health_service.get_weekly_summary(db, user_id=user_id)
+
+
+@router.get("/meal-plan")
+async def get_meal_plan(
+    target_date: Optional[date] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
+):
+    """Return today's meal plan, generating via Claude if not yet created."""
+    return await health_service.get_or_generate_meal_plan(db, target_date, user_id=user_id)
