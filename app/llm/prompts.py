@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from app.core.config import settings
 
 
 def build_system_prompt(
@@ -18,7 +21,7 @@ def build_system_prompt(
     recipe_context: str = "",
 ) -> str:
     """Build the system prompt with user context."""
-    now = datetime.now()
+    now = datetime.now(tz=ZoneInfo(settings.user_timezone))
     time_of_day = "morning" if now.hour < 12 else "afternoon" if now.hour < 17 else "evening"
     day_of_week = now.strftime("%A")
 

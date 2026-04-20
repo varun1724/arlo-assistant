@@ -4,7 +4,7 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,26 +49,27 @@ async def log_steps(body: LogStepsRequest, db: AsyncSession = Depends(get_db), u
 
 
 @router.post("/meals")
-async def log_meal(body: LogMealRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
+async def log_meal(request: Request, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    description = str(body.get("description", "")).strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+
     meal = await health_service.log_meal(
         db,
-        description=body.description,
-        calories=body.calories,
-        protein_g=body.protein_g,
-        carbs_g=body.carbs_g,
-        fat_g=body.fat_g,
-        meal_type=body.meal_type,
-        target_date=body.date,
+        description=description,
+        calories=float(body.get("calories", 0)),
+        protein_g=float(body.get("protein_g", 0)),
+        carbs_g=float(body.get("carbs_g", 0)),
+        fat_g=float(body.get("fat_g", 0)),
+        meal_type=str(body.get("meal_type", "other")),
         user_id=user_id,
     )
-    return {
-        "id": str(meal.id),
-        "description": meal.description,
-        "calories": meal.calories,
-        "protein_g": meal.protein_g,
-        "carbs_g": meal.carbs_g,
-        "fat_g": meal.fat_g,
-    }
+    return {"id": str(meal.id)}
 
 
 @router.post("/workouts")

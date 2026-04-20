@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "*"  # comma-separated origins, or * for all
 
+    # User timezone (IANA name, e.g. America/Los_Angeles)
+    user_timezone: str = "America/Los_Angeles"
+
     # Weather
     weather_api_key: str = ""
     weather_location: str = "San Francisco,US"
