@@ -1,7 +1,12 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+_req_logger = logging.getLogger("arlo.assistant.request")
 
 from app.api.auth import router as auth_router
 from app.api.calendar import router as calendar_router
@@ -48,6 +53,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Arlo Assistant", version="0.2.0", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body_bytes = b""
+    try:
+        body_bytes = await request.body()
+    except Exception:
+        pass
+    _req_logger.error(
+        "422 on %s %s | errors=%s | raw_body=%r",
+        request.method, request.url.path, exc.errors(), body_bytes[:2000],
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 # Middleware (order matters — first added = outermost)
 app.add_middleware(RequestLoggingMiddleware)

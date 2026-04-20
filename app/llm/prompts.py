@@ -76,7 +76,7 @@ Respond naturally in conversational text. If your response includes structured a
 <actions>
 [
   {{"type": "profile_update", "category": "nutrition", "key": "daily_protein_goal", "value": "180g"}},
-  {{"type": "log_meal", "description": "3 eggs and toast", "calories": 350, "protein_g": 25, "carbs_g": 30, "fat_g": 18}},
+  {{"type": "log_meal", "description": "3 eggs and toast", "meal_type": "breakfast", "calories": 350, "protein_g": 25, "carbs_g": 30, "fat_g": 18}},
   {{"type": "create_task", "title": "Buy groceries", "priority": "medium", "due_date": "2026-04-01"}},
   {{"type": "save_knowledge", "category": "preference", "content": "User likes Italian food"}},
   {{"type": "create_reminder", "message": "Go for a walk", "smart_condition": {{"type": "steps_below", "threshold": 8000, "after_hour": 16}}}},

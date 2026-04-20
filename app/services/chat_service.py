@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ConversationRow, MessageRow, UserProfileRow, HealthDailyRow, TaskRow, GoalRow, GroceryListRow, RecipeRow
+from app.db.models import ConversationRow, MessageRow, UserProfileRow, HealthDailyRow, MealRow, TaskRow, GoalRow, GroceryListRow, RecipeRow
 from app.llm.claude import chat_with_claude, ClaudeError
 from app.llm.prompts import build_system_prompt
 from app.llm.extractors import extract_actions
@@ -194,18 +194,49 @@ async def _get_profile_summary(session: AsyncSession, user_id: uuid.UUID) -> str
 async def _get_health_today(session: AsyncSession, user_id: uuid.UUID) -> str:
     from datetime import date
     today = date.today()
-    result = await session.execute(
+
+    # Activity totals (steps, active calories, sleep, heart rate)
+    daily_result = await session.execute(
         select(HealthDailyRow)
         .where(HealthDailyRow.user_id == user_id, HealthDailyRow.date == today)
     )
-    row = result.scalars().first()
-    if not row:
-        return ""
-    return (
-        f"Steps: {row.steps}, Calories: {row.calories}, "
-        f"Protein: {row.protein_g}g, Carbs: {row.carbs_g}g, Fat: {row.fat_g}g, "
-        f"Water: {row.water_oz}oz"
+    daily = daily_result.scalars().first()
+
+    # Today's logged meals (authoritative source for nutrition data)
+    meals_result = await session.execute(
+        select(MealRow)
+        .where(MealRow.user_id == user_id, MealRow.date == today)
+        .order_by(MealRow.created_at.asc())
     )
+    meals = meals_result.scalars().all()
+
+    lines = []
+    if daily and daily.steps:
+        lines.append(f"Steps: {daily.steps}")
+    if daily and daily.sleep_hours:
+        lines.append(f"Sleep: {daily.sleep_hours}h")
+    if daily and daily.resting_heart_rate:
+        lines.append(f"Resting HR: {daily.resting_heart_rate} bpm")
+
+    if meals:
+        total_cal = sum(m.calories for m in meals)
+        total_prot = sum(m.protein_g for m in meals)
+        total_carbs = sum(m.carbs_g for m in meals)
+        total_fat = sum(m.fat_g for m in meals)
+        lines.append(
+            f"Nutrition logged: {total_cal:.0f} kcal, "
+            f"{total_prot:.0f}g protein, {total_carbs:.0f}g carbs, {total_fat:.0f}g fat"
+        )
+        meal_lines = [
+            f"  - {m.meal_type.capitalize()}: {m.description} "
+            f"({m.calories:.0f} kcal, {m.protein_g:.0f}g P)"
+            for m in meals
+        ]
+        lines.extend(meal_lines)
+    else:
+        lines.append("No meals logged yet today.")
+
+    return "\n".join(lines) if lines else ""
 
 
 async def _get_pending_tasks(session: AsyncSession, user_id: uuid.UUID) -> str:
@@ -258,28 +289,30 @@ async def _get_schedule(session: AsyncSession, user_id: uuid.UUID) -> str:
 
 async def _get_goals_context(session: AsyncSession, user_id: uuid.UUID) -> str:
     from datetime import date
+    from sqlalchemy import func as sqlfunc
     today = date.today()
     result = await session.execute(
         select(GoalRow).where(GoalRow.user_id == user_id, GoalRow.status == "active")
     )
     goals = result.scalars().all()
 
-    # Get today's logged macros for remaining budget
-    daily_result = await session.execute(
-        select(HealthDailyRow).where(HealthDailyRow.user_id == user_id, HealthDailyRow.date == today)
+    # Sum macros directly from MealRow — accurate regardless of how meals were logged
+    macro_result = await session.execute(
+        select(
+            sqlfunc.coalesce(sqlfunc.sum(MealRow.protein_g), 0),
+            sqlfunc.coalesce(sqlfunc.sum(MealRow.calories), 0),
+        ).where(MealRow.user_id == user_id, MealRow.date == today)
     )
-    daily = daily_result.scalars().first()
-    logged_protein = daily.protein_g if daily else 0
-    logged_calories = daily.calories if daily else 0
+    totals = macro_result.one()
+    logged_protein = float(totals[0])
+    logged_calories = float(totals[1])
 
-    # Build goals string with remaining
     lines = []
     for g in goals:
         lines.append(f"- {g.title}: {g.target_value}{g.unit} (current: {g.current_value})")
 
-    # Always show macro budget
-    lines.append(f"- Protein today: {logged_protein:.0f}g logged, {200 - logged_protein:.0f}g remaining to hit 200g target")
-    lines.append(f"- Calories today: {logged_calories:.0f} kcal logged, {3000 - logged_calories:.0f} kcal remaining to hit 3000 kcal target")
+    lines.append(f"- Protein today: {logged_protein:.0f}g logged, {max(0, 200 - logged_protein):.0f}g remaining to hit 200g target")
+    lines.append(f"- Calories today: {logged_calories:.0f} kcal logged, {max(0, 3000 - logged_calories):.0f} kcal remaining to hit 3000 kcal target")
     return "\n".join(lines) if lines else ""
 
 
@@ -324,17 +357,19 @@ async def _process_actions(session: AsyncSession, actions: list[dict], user_id: 
                 session.add(row)
 
             elif action_type == "log_meal":
-                from datetime import date
-                row = __import__("app.db.models", fromlist=["MealRow"]).MealRow(
-                    user_id=user_id,
-                    date=date.today(),
-                    description=action.get("description", ""),
-                    calories=action.get("calories", 0),
-                    protein_g=action.get("protein_g", 0),
-                    carbs_g=action.get("carbs_g", 0),
-                    fat_g=action.get("fat_g", 0),
-                )
-                session.add(row)
+                from app.services.health_service import log_meal as _log_meal
+                desc = action.get("description", "").strip()
+                if desc:
+                    await _log_meal(
+                        session,
+                        description=desc,
+                        calories=action.get("calories", 0),
+                        protein_g=action.get("protein_g", 0),
+                        carbs_g=action.get("carbs_g", 0),
+                        fat_g=action.get("fat_g", 0),
+                        meal_type=action.get("meal_type", "other"),
+                        user_id=user_id,
+                    )
 
             elif action_type == "create_task":
                 from app.db.models import TaskRow as TR
