@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import user_today
 from app.db.models import HealthDailyRow, MealRow, WorkoutRow, GoalRow, KnowledgeRow, UserProfileRow, GroceryListRow, RecipeRow
 
 import logging
@@ -20,7 +21,7 @@ logger = logging.getLogger("arlo.assistant.health")
 async def get_or_create_daily(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> HealthDailyRow:
     """Get or create today's health record."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     result = await session.execute(
         select(HealthDailyRow).where(
@@ -55,7 +56,7 @@ async def log_steps(session: AsyncSession, steps: int, target_date: date | None 
 async def update_daily_macros(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> HealthDailyRow:
     """Recalculate daily totals from all meals logged today."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     daily = await get_or_create_daily(session, target_date, user_id=user_id)
 
@@ -104,7 +105,7 @@ async def log_meal(
 ) -> MealRow:
     """Log a meal and update daily totals."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     row = MealRow(
         user_id=user_id,
@@ -129,7 +130,7 @@ async def log_meal(
 async def get_meals(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> list[MealRow]:
     """Get all meals for a day."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     result = await session.execute(
         select(MealRow)
@@ -153,7 +154,7 @@ async def log_workout(
 ) -> WorkoutRow:
     """Log a workout."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     row = WorkoutRow(
         user_id=user_id,
@@ -172,7 +173,7 @@ async def log_workout(
 async def get_workouts(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> list[WorkoutRow]:
     """Get all workouts for a day."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     result = await session.execute(
         select(WorkoutRow)
@@ -191,7 +192,7 @@ async def get_dashboard(session: AsyncSession, target_date: date | None = None, 
     dashboard can never drift from the underlying meal records.
     """
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
 
     daily = await get_or_create_daily(session, target_date, user_id=user_id)
     meals = await get_meals(session, target_date, user_id=user_id)
@@ -253,7 +254,7 @@ async def get_or_generate_meal_plan(
 ) -> dict:
     """Return today's meal plan from cache or generate via Claude."""
     if target_date is None:
-        target_date = date.today()
+        target_date = user_today()
     date_str = target_date.isoformat()
 
     # Check cache first
@@ -393,7 +394,7 @@ Make meal suggestions practical, high-protein, and specific. Include estimated m
 async def get_weekly_summary(session: AsyncSession, *, user_id: uuid.UUID) -> dict:
     """Get the past 7 days of health data."""
     from datetime import timedelta
-    today = date.today()
+    today = user_today()
     week_ago = today - timedelta(days=7)
 
     result = await session.execute(

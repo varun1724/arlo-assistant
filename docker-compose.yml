@@ -23,6 +23,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - default
+      - arlo_network
 
 volumes:
   assistant_pgdata:
+
+networks:
+  arlo_network:
+    name: arlo_network
+    external: true

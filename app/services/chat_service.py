@@ -20,6 +20,9 @@ logger = logging.getLogger("arlo.assistant.chat")
 DEFAULT_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+from app.core.time import user_today as _user_today  # noqa: E402 — keep import local-feeling
+
+
 async def send_message(
     session: AsyncSession,
     conversation_id: uuid.UUID | None,
@@ -163,6 +166,41 @@ async def get_conversations(session: AsyncSession, limit: int = 20, user_id: uui
     return list(result.scalars().all())
 
 
+async def get_last_message(
+    session: AsyncSession, conversation_id: uuid.UUID
+) -> MessageRow | None:
+    """Return the most recent complete message in a conversation, for list previews."""
+    result = await session.execute(
+        select(MessageRow)
+        .where(
+            MessageRow.conversation_id == conversation_id,
+            MessageRow.status == "complete",
+        )
+        .order_by(MessageRow.created_at.desc())
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
+async def delete_conversation(
+    session: AsyncSession, conversation_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    """Delete a conversation and all of its messages. Returns True if deleted."""
+    from sqlalchemy import delete
+    # Only allow deleting conversations owned by this user.
+    convo = await session.get(ConversationRow, conversation_id)
+    if convo is None or convo.user_id != user_id:
+        return False
+    await session.execute(
+        delete(MessageRow).where(MessageRow.conversation_id == conversation_id)
+    )
+    await session.execute(
+        delete(ConversationRow).where(ConversationRow.id == conversation_id)
+    )
+    await session.commit()
+    return True
+
+
 async def get_conversation_messages(
     session: AsyncSession, conversation_id: uuid.UUID, limit: int = 50
 ) -> list[MessageRow]:
@@ -192,8 +230,7 @@ async def _get_profile_summary(session: AsyncSession, user_id: uuid.UUID) -> str
 
 
 async def _get_health_today(session: AsyncSession, user_id: uuid.UUID) -> str:
-    from datetime import date
-    today = date.today()
+    today = _user_today()
 
     # Activity totals (steps, active calories, sleep, heart rate)
     daily_result = await session.execute(
@@ -412,17 +449,49 @@ async def _process_actions(session: AsyncSession, actions: list[dict], user_id: 
 
             elif action_type == "generate_meal_plan":
                 import json as _json
-                from datetime import date
                 from app.db.models import KnowledgeRow
                 plan_data = action.get("plan", {})
-                plan_data["date"] = date.today().isoformat()
+                today_str = _user_today().isoformat()
+                plan_data["date"] = today_str
                 row = KnowledgeRow(
                     user_id=user_id,
                     category="meal_plan",
                     content=_json.dumps(plan_data),
-                    tags={"date": date.today().isoformat()},
+                    tags={"date": today_str},
                 )
                 session.add(row)
+
+            elif action_type == "update_goal":
+                # Upsert a goal by title. Used when the user asks Arlo to
+                # change their daily protein / calorie / steps / workouts target.
+                from app.db.models import GoalRow as GR
+                title = (action.get("title") or "").strip()
+                target = action.get("target_value")
+                if title and target is not None:
+                    existing = (await session.execute(
+                        select(GR).where(
+                            GR.user_id == user_id,
+                            GR.title == title,
+                        )
+                    )).scalars().first()
+                    if existing:
+                        existing.target_value = float(target)
+                        if action.get("unit"):
+                            existing.unit = action["unit"]
+                        if action.get("category"):
+                            existing.category = action["category"]
+                        if existing.status != "active":
+                            existing.status = "active"
+                    else:
+                        row = GR(
+                            user_id=user_id,
+                            title=title,
+                            target_value=float(target),
+                            unit=action.get("unit", ""),
+                            category=action.get("category", "health"),
+                            status="active",
+                        )
+                        session.add(row)
 
             elif action_type == "create_event":
                 from app.db.models import CalendarEventRow

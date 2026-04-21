@@ -57,7 +57,10 @@ async def refresh(user_id=Depends(verify_refresh_token), db: AsyncSession = Depe
 
 @router.get("/me")
 async def me(user_id=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.db.models import AuthUserRow
     user = await auth_service.get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"id": str(user.id), "name": user.name}
+    auth_user = await db.get(AuthUserRow, user_id)
+    email = auth_user.email if auth_user else None
+    return {"id": str(user.id), "name": user.name, "email": email}

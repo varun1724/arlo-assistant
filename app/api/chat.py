@@ -84,18 +84,35 @@ async def list_conversations(
     user_id: uuid.UUID = Depends(get_current_user),
 ):
     convos = await chat_service.get_conversations(db, limit=limit, user_id=user_id)
-    return {
-        "conversations": [
-            {
-                "id": str(c.id),
-                "title": c.title,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
-            }
-            for c in convos
-        ],
-        "count": len(convos),
-    }
+    out = []
+    for c in convos:
+        last = await chat_service.get_last_message(db, c.id)
+        preview = None
+        role = None
+        if last is not None:
+            preview = (last.content or "")[:160]
+            role = last.role
+        out.append({
+            "id": str(c.id),
+            "title": c.title,
+            "created_at": c.created_at.isoformat(),
+            "updated_at": c.updated_at.isoformat(),
+            "last_message_preview": preview,
+            "last_message_role": role,
+        })
+    return {"conversations": out, "count": len(convos)}
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user),
+):
+    ok = await chat_service.delete_conversation(db, conversation_id, user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"deleted": True}
 
 
 @router.get("/conversations/{conversation_id}")

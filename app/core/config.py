@@ -21,14 +21,18 @@ class Settings(BaseSettings):
     claude_model: str = "sonnet"
     claude_timeout_seconds: int = 120
 
-    # Arlo Runtime
-    arlo_runtime_url: str = "http://localhost:8000"
+    # Arlo Runtime — default to the Docker service name so assistant ↔ runtime
+    # works inside arlo_network. Override via env var for local dev outside Docker.
+    arlo_runtime_url: str = "http://arlo-runtime-api-1:8000"
     arlo_runtime_token: str = "change-me-to-a-real-secret"
 
     # Environment
     environment: str = "development"  # development, staging, production
     log_level: str = "INFO"
-    cors_origins: str = "*"  # comma-separated origins, or * for all
+    # Comma-separated allowed origins. The iOS app is native and doesn't
+    # actually trigger CORS; this mostly matters for web callers. Keep the
+    # Tailscale host + localhost for dev, block everything else by default.
+    cors_origins: str = "http://100.75.94.5,http://localhost,http://127.0.0.1"
 
     # User timezone (IANA name, e.g. America/Los_Angeles)
     user_timezone: str = "America/Los_Angeles"

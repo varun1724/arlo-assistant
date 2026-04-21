@@ -26,9 +26,13 @@ class CreateGoalRequest(BaseModel):
 
 class UpdateGoalRequest(BaseModel):
     current_value: Optional[float] = None
+    target_value: Optional[float] = None
     status: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
+    unit: Optional[str] = None
+    category: Optional[str] = None
+    deadline: Optional[date] = None
 
 
 @router.post("", status_code=201)
