@@ -185,13 +185,31 @@ async def get_workouts(session: AsyncSession, target_date: date | None = None, *
 # ─── Dashboard ───────────────────────────────────────────
 
 async def get_dashboard(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> dict:
-    """Get today's health dashboard with stats vs goals."""
+    """Get today's health dashboard with stats vs goals.
+
+    Macros are aggregated directly from MealRow on every request so the
+    dashboard can never drift from the underlying meal records.
+    """
     if target_date is None:
         target_date = date.today()
 
     daily = await get_or_create_daily(session, target_date, user_id=user_id)
     meals = await get_meals(session, target_date, user_id=user_id)
     workouts = await get_workouts(session, target_date, user_id=user_id)
+
+    # Sum macros directly from meals for this date (authoritative source)
+    macro_totals = await session.execute(
+        select(
+            func.coalesce(func.sum(MealRow.calories), 0),
+            func.coalesce(func.sum(MealRow.protein_g), 0),
+            func.coalesce(func.sum(MealRow.carbs_g), 0),
+            func.coalesce(func.sum(MealRow.fat_g), 0),
+        ).where(
+            MealRow.user_id == user_id,
+            MealRow.date == target_date,
+        )
+    )
+    calories, protein_g, carbs_g, fat_g = macro_totals.one()
 
     # Get health goals
     goals = {}
@@ -208,10 +226,10 @@ async def get_dashboard(session: AsyncSession, target_date: date | None = None, 
     return {
         "date": target_date.isoformat(),
         "steps": daily.steps,
-        "calories": daily.calories,
-        "protein_g": daily.protein_g,
-        "carbs_g": daily.carbs_g,
-        "fat_g": daily.fat_g,
+        "calories": float(calories),
+        "protein_g": float(protein_g),
+        "carbs_g": float(carbs_g),
+        "fat_g": float(fat_g),
         "water_oz": daily.water_oz,
         "sleep_hours": daily.sleep_hours,
         "resting_heart_rate": daily.resting_heart_rate,

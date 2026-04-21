@@ -1,20 +1,16 @@
 """Health API — steps, meals, workouts, dashboard."""
 
-import json
-import logging
 import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.db.engine import get_db
 from app.services import health_service
-
-_log = logging.getLogger("arlo.health")
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -53,34 +49,28 @@ async def log_steps(body: LogStepsRequest, db: AsyncSession = Depends(get_db), u
 
 
 @router.post("/meals")
-async def log_meal(request: Request, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    raw = await request.body()
-    _log.info("POST /health/meals user=%s bytes=%d body=%r", user_id, len(raw), raw[:300])
-
-    if not raw:
-        raise HTTPException(status_code=400, detail="Empty request body (0 bytes received)")
-
-    try:
-        body = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        _log.error("POST /health/meals JSON parse failed: %s | raw=%r", exc, raw[:300])
-        raise HTTPException(status_code=400, detail=f"Invalid JSON ({len(raw)} bytes received)")
-
-    description = str(body.get("description", "")).strip()
-    if not description:
-        raise HTTPException(status_code=400, detail="description is required")
-
+async def log_meal(body: LogMealRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     meal = await health_service.log_meal(
         db,
-        description=description,
-        calories=float(body.get("calories", 0)),
-        protein_g=float(body.get("protein_g", 0)),
-        carbs_g=float(body.get("carbs_g", 0)),
-        fat_g=float(body.get("fat_g", 0)),
-        meal_type=str(body.get("meal_type", "other")),
+        description=body.description.strip(),
+        calories=body.calories,
+        protein_g=body.protein_g,
+        carbs_g=body.carbs_g,
+        fat_g=body.fat_g,
+        meal_type=body.meal_type,
+        target_date=body.date,
         user_id=user_id,
     )
-    return {"id": str(meal.id)}
+    return {
+        "id": str(meal.id),
+        "meal_type": meal.meal_type,
+        "description": meal.description,
+        "calories": meal.calories,
+        "protein_g": meal.protein_g,
+        "carbs_g": meal.carbs_g,
+        "fat_g": meal.fat_g,
+        "created_at": meal.created_at.isoformat(),
+    }
 
 
 @router.post("/workouts")
