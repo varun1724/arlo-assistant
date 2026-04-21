@@ -28,11 +28,22 @@ async def get_knowledge(
     return list(result.scalars().all())
 
 
-async def get_knowledge_entry(session: AsyncSession, entry_id: uuid.UUID) -> Optional[KnowledgeRow]:
-    return await session.get(KnowledgeRow, entry_id)
+async def get_knowledge_entry(
+    session: AsyncSession, entry_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[KnowledgeRow]:
+    row = await session.get(KnowledgeRow, entry_id)
+    if row is None or row.user_id != user_id:
+        return None
+    return row
 
 
-async def delete_knowledge(session: AsyncSession, entry_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(KnowledgeRow).where(KnowledgeRow.id == entry_id))
+async def delete_knowledge(
+    session: AsyncSession, entry_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(KnowledgeRow).where(
+            KnowledgeRow.id == entry_id, KnowledgeRow.user_id == user_id,
+        )
+    )
     await session.commit()
     return result.rowcount > 0

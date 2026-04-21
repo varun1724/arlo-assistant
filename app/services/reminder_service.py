@@ -59,9 +59,11 @@ async def get_reminders(
     return list(result.scalars().all())
 
 
-async def dismiss_reminder(session: AsyncSession, reminder_id: uuid.UUID) -> Optional[ReminderRow]:
+async def dismiss_reminder(
+    session: AsyncSession, reminder_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[ReminderRow]:
     row = await session.get(ReminderRow, reminder_id)
-    if not row:
+    if row is None or row.user_id != user_id:
         return None
     row.status = "dismissed"
     await session.commit()
@@ -69,8 +71,14 @@ async def dismiss_reminder(session: AsyncSession, reminder_id: uuid.UUID) -> Opt
     return row
 
 
-async def delete_reminder(session: AsyncSession, reminder_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(ReminderRow).where(ReminderRow.id == reminder_id))
+async def delete_reminder(
+    session: AsyncSession, reminder_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(ReminderRow).where(
+            ReminderRow.id == reminder_id, ReminderRow.user_id == user_id,
+        )
+    )
     await session.commit()
     return result.rowcount > 0
 

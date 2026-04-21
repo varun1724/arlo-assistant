@@ -47,7 +47,7 @@ async def list_recipes(
 
 @router.get("/{recipe_id}")
 async def get_recipe(recipe_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    recipe = await recipe_service.get_recipe(db, recipe_id)
+    recipe = await recipe_service.get_recipe(db, recipe_id, user_id=user_id)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return _recipe_response(recipe)
@@ -55,7 +55,7 @@ async def get_recipe(recipe_id: uuid.UUID, db: AsyncSession = Depends(get_db), u
 
 @router.delete("/{recipe_id}")
 async def delete_recipe(recipe_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await recipe_service.delete_recipe(db, recipe_id)
+    deleted = await recipe_service.delete_recipe(db, recipe_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return {"deleted": True}

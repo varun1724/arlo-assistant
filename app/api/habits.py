@@ -33,7 +33,7 @@ async def list_habits(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = D
 
 @router.patch("/{habit_id}/check")
 async def check_habit(habit_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    habit = await task_service.check_habit(db, habit_id)
+    habit = await task_service.check_habit(db, habit_id, user_id=user_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     return _habit_response(habit)
@@ -41,7 +41,7 @@ async def check_habit(habit_id: uuid.UUID, db: AsyncSession = Depends(get_db), u
 
 @router.delete("/{habit_id}")
 async def delete_habit(habit_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await task_service.delete_habit(db, habit_id)
+    deleted = await task_service.delete_habit(db, habit_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Habit not found")
     return {"deleted": True}

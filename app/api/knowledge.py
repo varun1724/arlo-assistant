@@ -29,7 +29,7 @@ async def list_knowledge(
 
 @router.get("/{entry_id}")
 async def get_knowledge(entry_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    entry = await knowledge_service.get_knowledge_entry(db, entry_id)
+    entry = await knowledge_service.get_knowledge_entry(db, entry_id, user_id=user_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Knowledge entry not found")
     return _entry_response(entry)
@@ -37,7 +37,7 @@ async def get_knowledge(entry_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 
 @router.delete("/{entry_id}")
 async def delete_knowledge(entry_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await knowledge_service.delete_knowledge(db, entry_id)
+    deleted = await knowledge_service.delete_knowledge(db, entry_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Knowledge entry not found")
     return {"deleted": True}

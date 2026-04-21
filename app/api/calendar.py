@@ -63,7 +63,7 @@ async def today_events(db: AsyncSession = Depends(get_db), user_id: uuid.UUID = 
 @router.patch("/events/{event_id}")
 async def update_event(event_id: uuid.UUID, body: UpdateEventRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     fields = body.model_dump(exclude_unset=True)
-    event = await calendar_service.update_event(db, event_id, **fields)
+    event = await calendar_service.update_event(db, event_id, user_id=user_id, **fields)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     return _event_response(event)
@@ -71,7 +71,7 @@ async def update_event(event_id: uuid.UUID, body: UpdateEventRequest, db: AsyncS
 
 @router.delete("/events/{event_id}")
 async def delete_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await calendar_service.delete_event(db, event_id)
+    deleted = await calendar_service.delete_event(db, event_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Event not found")
     return {"deleted": True}

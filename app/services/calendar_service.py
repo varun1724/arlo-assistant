@@ -61,13 +61,20 @@ async def get_today_events(session: AsyncSession, *, user_id: uuid.UUID) -> list
     return await get_events(session, start_date=today, end_date=today, user_id=user_id)
 
 
-async def get_event(session: AsyncSession, event_id: uuid.UUID) -> Optional[CalendarEventRow]:
-    return await session.get(CalendarEventRow, event_id)
-
-
-async def update_event(session: AsyncSession, event_id: uuid.UUID, **fields) -> Optional[CalendarEventRow]:
+async def get_event(
+    session: AsyncSession, event_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[CalendarEventRow]:
     row = await session.get(CalendarEventRow, event_id)
-    if not row:
+    if row is None or row.user_id != user_id:
+        return None
+    return row
+
+
+async def update_event(
+    session: AsyncSession, event_id: uuid.UUID, *, user_id: uuid.UUID, **fields,
+) -> Optional[CalendarEventRow]:
+    row = await session.get(CalendarEventRow, event_id)
+    if row is None or row.user_id != user_id:
         return None
     for key, value in fields.items():
         if value is not None and hasattr(row, key):
@@ -77,8 +84,14 @@ async def update_event(session: AsyncSession, event_id: uuid.UUID, **fields) -> 
     return row
 
 
-async def delete_event(session: AsyncSession, event_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(CalendarEventRow).where(CalendarEventRow.id == event_id))
+async def delete_event(
+    session: AsyncSession, event_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(CalendarEventRow).where(
+            CalendarEventRow.id == event_id, CalendarEventRow.user_id == user_id,
+        )
+    )
     await session.commit()
     return result.rowcount > 0
 

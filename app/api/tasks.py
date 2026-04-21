@@ -59,7 +59,7 @@ async def list_tasks(
 @router.patch("/{task_id}")
 async def update_task(task_id: uuid.UUID, body: UpdateTaskRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     fields = body.model_dump(exclude_unset=True)
-    task = await task_service.update_task(db, task_id, **fields)
+    task = await task_service.update_task(db, task_id, user_id=user_id, **fields)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return _task_response(task)
@@ -67,7 +67,7 @@ async def update_task(task_id: uuid.UUID, body: UpdateTaskRequest, db: AsyncSess
 
 @router.delete("/{task_id}")
 async def delete_task(task_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await task_service.delete_task(db, task_id)
+    deleted = await task_service.delete_task(db, task_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"deleted": True}

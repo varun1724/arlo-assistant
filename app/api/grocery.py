@@ -33,7 +33,7 @@ async def list_grocery_lists(db: AsyncSession = Depends(get_db), user_id: uuid.U
 
 @router.get("/{list_id}")
 async def get_grocery_list(list_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    gl = await recipe_service.get_grocery_list(db, list_id)
+    gl = await recipe_service.get_grocery_list(db, list_id, user_id=user_id)
     if not gl:
         raise HTTPException(status_code=404, detail="Grocery list not found")
     return _gl_response(gl)
@@ -41,7 +41,7 @@ async def get_grocery_list(list_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 @router.patch("/{list_id}/items/{item_idx}/check")
 async def toggle_item(list_id: uuid.UUID, item_idx: int, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    gl = await recipe_service.toggle_grocery_item(db, list_id, item_idx)
+    gl = await recipe_service.toggle_grocery_item(db, list_id, item_idx, user_id=user_id)
     if not gl:
         raise HTTPException(status_code=404, detail="List or item not found")
     return _gl_response(gl)
@@ -49,7 +49,7 @@ async def toggle_item(list_id: uuid.UUID, item_idx: int, db: AsyncSession = Depe
 
 @router.delete("/{list_id}")
 async def delete_grocery_list(list_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await recipe_service.delete_grocery_list(db, list_id)
+    deleted = await recipe_service.delete_grocery_list(db, list_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Grocery list not found")
     return {"deleted": True}

@@ -55,12 +55,21 @@ async def get_recipes(
     return list(result.scalars().all())
 
 
-async def get_recipe(session: AsyncSession, recipe_id: uuid.UUID) -> Optional[RecipeRow]:
-    return await session.get(RecipeRow, recipe_id)
+async def get_recipe(
+    session: AsyncSession, recipe_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[RecipeRow]:
+    row = await session.get(RecipeRow, recipe_id)
+    if row is None or row.user_id != user_id:
+        return None
+    return row
 
 
-async def delete_recipe(session: AsyncSession, recipe_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(RecipeRow).where(RecipeRow.id == recipe_id))
+async def delete_recipe(
+    session: AsyncSession, recipe_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(RecipeRow).where(RecipeRow.id == recipe_id, RecipeRow.user_id == user_id)
+    )
     await session.commit()
     return result.rowcount > 0
 
@@ -94,13 +103,20 @@ async def get_grocery_lists(session: AsyncSession, *, user_id: uuid.UUID) -> lis
     return list(result.scalars().all())
 
 
-async def get_grocery_list(session: AsyncSession, list_id: uuid.UUID) -> Optional[GroceryListRow]:
-    return await session.get(GroceryListRow, list_id)
-
-
-async def toggle_grocery_item(session: AsyncSession, list_id: uuid.UUID, item_idx: int) -> Optional[GroceryListRow]:
+async def get_grocery_list(
+    session: AsyncSession, list_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[GroceryListRow]:
     row = await session.get(GroceryListRow, list_id)
-    if not row or not row.items:
+    if row is None or row.user_id != user_id:
+        return None
+    return row
+
+
+async def toggle_grocery_item(
+    session: AsyncSession, list_id: uuid.UUID, item_idx: int, *, user_id: uuid.UUID,
+) -> Optional[GroceryListRow]:
+    row = await session.get(GroceryListRow, list_id)
+    if row is None or row.user_id != user_id or not row.items:
         return None
     if item_idx < 0 or item_idx >= len(row.items):
         return None
@@ -114,7 +130,13 @@ async def toggle_grocery_item(session: AsyncSession, list_id: uuid.UUID, item_id
     return row
 
 
-async def delete_grocery_list(session: AsyncSession, list_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(GroceryListRow).where(GroceryListRow.id == list_id))
+async def delete_grocery_list(
+    session: AsyncSession, list_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(GroceryListRow).where(
+            GroceryListRow.id == list_id, GroceryListRow.user_id == user_id,
+        )
+    )
     await session.commit()
     return result.rowcount > 0

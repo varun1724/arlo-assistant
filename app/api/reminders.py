@@ -50,7 +50,7 @@ async def get_triggered(db: AsyncSession = Depends(get_db), user_id: uuid.UUID =
 
 @router.patch("/{reminder_id}/dismiss")
 async def dismiss_reminder(reminder_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    reminder = await reminder_service.dismiss_reminder(db, reminder_id)
+    reminder = await reminder_service.dismiss_reminder(db, reminder_id, user_id=user_id)
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
     return _reminder_response(reminder)
@@ -58,7 +58,7 @@ async def dismiss_reminder(reminder_id: uuid.UUID, db: AsyncSession = Depends(ge
 
 @router.delete("/{reminder_id}")
 async def delete_reminder(reminder_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await reminder_service.delete_reminder(db, reminder_id)
+    deleted = await reminder_service.delete_reminder(db, reminder_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Reminder not found")
     return {"deleted": True}

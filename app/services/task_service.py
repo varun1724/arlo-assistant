@@ -61,17 +61,24 @@ async def get_tasks(
     return list(result.scalars().all())
 
 
-async def get_task(session: AsyncSession, task_id: uuid.UUID) -> Optional[TaskRow]:
-    return await session.get(TaskRow, task_id)
+async def get_task(
+    session: AsyncSession, task_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[TaskRow]:
+    row = await session.get(TaskRow, task_id)
+    if row is None or row.user_id != user_id:
+        return None
+    return row
 
 
 async def update_task(
     session: AsyncSession,
     task_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID,
     **fields,
 ) -> Optional[TaskRow]:
     row = await session.get(TaskRow, task_id)
-    if not row:
+    if row is None or row.user_id != user_id:
         return None
     for key, value in fields.items():
         if value is not None and hasattr(row, key):
@@ -83,8 +90,12 @@ async def update_task(
     return row
 
 
-async def delete_task(session: AsyncSession, task_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(TaskRow).where(TaskRow.id == task_id))
+async def delete_task(
+    session: AsyncSession, task_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(TaskRow).where(TaskRow.id == task_id, TaskRow.user_id == user_id)
+    )
     await session.commit()
     return result.rowcount > 0
 
@@ -137,10 +148,12 @@ async def get_goals(
 async def update_goal(
     session: AsyncSession,
     goal_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID,
     **fields,
 ) -> Optional[GoalRow]:
     row = await session.get(GoalRow, goal_id)
-    if not row:
+    if row is None or row.user_id != user_id:
         return None
     for key, value in fields.items():
         if value is not None and hasattr(row, key):
@@ -152,8 +165,12 @@ async def update_goal(
     return row
 
 
-async def delete_goal(session: AsyncSession, goal_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(GoalRow).where(GoalRow.id == goal_id))
+async def delete_goal(
+    session: AsyncSession, goal_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(GoalRow).where(GoalRow.id == goal_id, GoalRow.user_id == user_id)
+    )
     await session.commit()
     return result.rowcount > 0
 
@@ -188,9 +205,11 @@ async def get_habits(session: AsyncSession, *, user_id: uuid.UUID) -> list[Habit
     return list(result.scalars().all())
 
 
-async def check_habit(session: AsyncSession, habit_id: uuid.UUID) -> Optional[HabitRow]:
+async def check_habit(
+    session: AsyncSession, habit_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> Optional[HabitRow]:
     row = await session.get(HabitRow, habit_id)
-    if not row:
+    if row is None or row.user_id != user_id:
         return None
 
     today = user_today()
@@ -214,7 +233,11 @@ async def check_habit(session: AsyncSession, habit_id: uuid.UUID) -> Optional[Ha
     return row
 
 
-async def delete_habit(session: AsyncSession, habit_id: uuid.UUID) -> bool:
-    result = await session.execute(delete(HabitRow).where(HabitRow.id == habit_id))
+async def delete_habit(
+    session: AsyncSession, habit_id: uuid.UUID, *, user_id: uuid.UUID,
+) -> bool:
+    result = await session.execute(
+        delete(HabitRow).where(HabitRow.id == habit_id, HabitRow.user_id == user_id)
+    )
     await session.commit()
     return result.rowcount > 0

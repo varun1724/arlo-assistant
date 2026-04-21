@@ -60,7 +60,7 @@ async def list_goals(
 @router.patch("/{goal_id}")
 async def update_goal(goal_id: uuid.UUID, body: UpdateGoalRequest, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
     fields = body.model_dump(exclude_unset=True)
-    goal = await task_service.update_goal(db, goal_id, **fields)
+    goal = await task_service.update_goal(db, goal_id, user_id=user_id, **fields)
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
     return _goal_response(goal)
@@ -68,7 +68,7 @@ async def update_goal(goal_id: uuid.UUID, body: UpdateGoalRequest, db: AsyncSess
 
 @router.delete("/{goal_id}")
 async def delete_goal(goal_id: uuid.UUID, db: AsyncSession = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user)):
-    deleted = await task_service.delete_goal(db, goal_id)
+    deleted = await task_service.delete_goal(db, goal_id, user_id=user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Goal not found")
     return {"deleted": True}

@@ -152,8 +152,21 @@ async def process_message(
         logger.exception("Message %s failed unexpectedly", message_id)
 
 
-async def get_message(session: AsyncSession, message_id: uuid.UUID) -> MessageRow | None:
-    return await session.get(MessageRow, message_id)
+async def get_message(
+    session: AsyncSession,
+    message_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> MessageRow | None:
+    """Return a message, optionally scoped to the owning user's conversations."""
+    msg = await session.get(MessageRow, message_id)
+    if msg is None:
+        return None
+    if user_id is not None:
+        convo = await session.get(ConversationRow, msg.conversation_id)
+        if convo is None or convo.user_id != user_id:
+            return None
+    return msg
 
 
 async def get_conversations(session: AsyncSession, limit: int = 20, user_id: uuid.UUID = DEFAULT_USER_ID) -> list[ConversationRow]:
@@ -202,8 +215,18 @@ async def delete_conversation(
 
 
 async def get_conversation_messages(
-    session: AsyncSession, conversation_id: uuid.UUID, limit: int = 50
-) -> list[MessageRow]:
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    limit: int = 50,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> list[MessageRow] | None:
+    """Return messages for a conversation. If ``user_id`` is given and the
+    conversation isn't owned by that user, returns ``None`` so callers can 404."""
+    if user_id is not None:
+        convo = await session.get(ConversationRow, conversation_id)
+        if convo is None or convo.user_id != user_id:
+            return None
     result = await session.execute(
         select(MessageRow)
         .where(MessageRow.conversation_id == conversation_id)
@@ -325,9 +348,8 @@ async def _get_schedule(session: AsyncSession, user_id: uuid.UUID) -> str:
 
 
 async def _get_goals_context(session: AsyncSession, user_id: uuid.UUID) -> str:
-    from datetime import date
     from sqlalchemy import func as sqlfunc
-    today = date.today()
+    today = _user_today()
     result = await session.execute(
         select(GoalRow).where(GoalRow.user_id == user_id, GoalRow.status == "active")
     )

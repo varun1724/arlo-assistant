@@ -66,7 +66,7 @@ async def get_message(
     user_id: uuid.UUID = Depends(get_current_user),
 ):
     """Get a message by ID. Check status: 'thinking' means still processing."""
-    msg = await chat_service.get_message(db, message_id)
+    msg = await chat_service.get_message(db, message_id, user_id=user_id)
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
     return MessageResponse(
@@ -121,7 +121,11 @@ async def get_conversation(
     db: AsyncSession = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user),
 ):
-    messages = await chat_service.get_conversation_messages(db, conversation_id)
+    messages = await chat_service.get_conversation_messages(
+        db, conversation_id, user_id=user_id,
+    )
+    if messages is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return {
         "conversation_id": str(conversation_id),
         "messages": [
@@ -146,22 +150,31 @@ async def stream_message(
     """SSE stream that pushes updates until the message is complete.
     Use this instead of polling GET /chat/message/{id}.
     """
+    # Verify ownership once before the stream opens, so an unauthorized caller
+    # gets an immediate 404 instead of an event stream that silently emits
+    # another user's content.
+    async with async_session() as session:
+        initial = await chat_service.get_message(session, message_id, user_id=user_id)
+    if initial is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
     async def event_generator():
         import json
-        while True:
-            async with async_session() as session:
+        async with async_session() as session:
+            while True:
                 msg = await chat_service.get_message(session, message_id)
-            if msg is None:
-                yield {"event": "error", "data": json.dumps({"error": "Message not found"})}
-                return
-            data = {
-                "message_id": str(msg.id),
-                "status": msg.status,
-                "content": msg.content,
-            }
-            yield {"event": "message", "data": json.dumps(data)}
-            if msg.status in ("complete", "error"):
-                return
-            await asyncio.sleep(1)
+                if msg is None:
+                    yield {"event": "error", "data": json.dumps({"error": "Message not found"})}
+                    return
+                data = {
+                    "message_id": str(msg.id),
+                    "status": msg.status,
+                    "content": msg.content,
+                }
+                yield {"event": "message", "data": json.dumps(data)}
+                if msg.status in ("complete", "error"):
+                    return
+                await asyncio.sleep(1)
+                await session.expire_all()
 
     return EventSourceResponse(event_generator())
