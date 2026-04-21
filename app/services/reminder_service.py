@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import user_today
 from app.db.models import ReminderRow, HealthDailyRow, HabitRow
 
 import logging
@@ -77,7 +78,7 @@ async def delete_reminder(session: AsyncSession, reminder_id: uuid.UUID) -> bool
 async def get_triggered_reminders(session: AsyncSession, *, user_id: uuid.UUID) -> list[ReminderRow]:
     """Get all reminders that should fire now (time-based or smart condition)."""
     now = datetime.now(timezone.utc)
-    today = date.today()
+    today = user_today()
 
     active = await get_reminders(session, status="active", user_id=user_id)
     triggered = []

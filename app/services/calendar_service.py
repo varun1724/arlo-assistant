@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy import select, delete, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import user_today
 from app.db.models import CalendarEventRow
 
 
@@ -56,7 +57,7 @@ async def get_events(
 
 
 async def get_today_events(session: AsyncSession, *, user_id: uuid.UUID) -> list[CalendarEventRow]:
-    today = date.today()
+    today = user_today()
     return await get_events(session, start_date=today, end_date=today, user_id=user_id)
 
 

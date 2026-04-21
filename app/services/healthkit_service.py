@@ -7,6 +7,7 @@ from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import user_today
 from app.db.models import HealthDailyRow, WorkoutRow
 from app.services.health_service import get_or_create_daily
 
@@ -26,7 +27,7 @@ async def sync_healthkit(
     Takes MAX of steps (manual vs HealthKit), overwrites heart rate/sleep,
     and creates workout records avoiding duplicates.
     """
-    sync_date = date.fromisoformat(data["date"]) if isinstance(data.get("date"), str) else date.today()
+    sync_date = date.fromisoformat(data["date"]) if isinstance(data.get("date"), str) else user_today()
 
     daily = await get_or_create_daily(session, sync_date, user_id=user_id)
 

@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import user_today
 from app.db.models import TaskRow, GoalRow, HabitRow
 
 
@@ -192,7 +193,7 @@ async def check_habit(session: AsyncSession, habit_id: uuid.UUID) -> Optional[Ha
     if not row:
         return None
 
-    today = date.today()
+    today = user_today()
     if row.last_done == today:
         return row  # already checked today
 
