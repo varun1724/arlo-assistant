@@ -29,9 +29,41 @@ from app.db.engine import engine
 from app.db import models  # noqa: F401
 
 
+_DEFAULT_SECRET_VALUES = {
+    "jwt_secret": "dev-jwt-secret-change-in-production",
+    "api_key": "arlo-assistant-dev-key",
+    "arlo_runtime_token": "change-me-to-a-real-secret",
+}
+
+
+def _audit_secrets() -> None:
+    """Warn loudly (dev) or refuse to boot (prod) if any sensitive value is
+    still the shipping default. The intent is to stop an operator from
+    accidentally exposing a container on the Tailscale network with the
+    committed dev JWT secret.
+    """
+    audit_log = logging.getLogger("arlo.assistant.security")
+    offenders = [
+        field for field, default in _DEFAULT_SECRET_VALUES.items()
+        if getattr(settings, field, None) == default
+    ]
+    if not offenders:
+        return
+    message = (
+        "Sensitive settings still hold the shipped default value: "
+        + ", ".join(offenders)
+        + ". Rotate before exposing this service publicly."
+    )
+    if settings.environment == "production":
+        raise RuntimeError(message)
+    for field in offenders:
+        audit_log.warning("%s is using the default shipped value.", field)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    _audit_secrets()
 
     # Create tables (will be replaced by alembic in production)
     async with engine.begin() as conn:
