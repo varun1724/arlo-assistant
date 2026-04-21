@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime, date
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric,
-    String, Text, func,
+    Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric,
+    String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -74,10 +74,13 @@ class MessageRow(Base):
 
 class HealthDailyRow(Base):
     __tablename__ = "health_daily"
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_health_daily_user_date"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
     steps: Mapped[int] = mapped_column(Integer, default=0)
     calories: Mapped[float] = mapped_column(Float, default=0)
     protein_g: Mapped[float] = mapped_column(Float, default=0)

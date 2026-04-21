@@ -6,6 +6,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import user_today
@@ -19,24 +20,32 @@ logger = logging.getLogger("arlo.assistant.health")
 # ─── Daily Health ────────────────────────────────────────
 
 async def get_or_create_daily(session: AsyncSession, target_date: date | None = None, *, user_id: uuid.UUID) -> HealthDailyRow:
-    """Get or create today's health record."""
+    """Get or create today's health record.
+
+    Safe under concurrent callers thanks to the ``uq_health_daily_user_date``
+    unique constraint and ``ON CONFLICT DO NOTHING`` — the background meal
+    logger and the HealthKit sync both touch this row.
+    """
     if target_date is None:
         target_date = user_today()
 
-    result = await session.execute(
-        select(HealthDailyRow).where(
+    def _select():
+        return select(HealthDailyRow).where(
             HealthDailyRow.user_id == user_id,
             HealthDailyRow.date == target_date,
         )
-    )
-    row = result.scalars().first()
+
+    row = (await session.execute(_select())).scalars().first()
     if row:
         return row
 
-    row = HealthDailyRow(user_id=user_id, date=target_date)
-    session.add(row)
+    await session.execute(
+        pg_insert(HealthDailyRow)
+        .values(user_id=user_id, date=target_date)
+        .on_conflict_do_nothing(constraint="uq_health_daily_user_date")
+    )
     await session.commit()
-    await session.refresh(row)
+    row = (await session.execute(_select())).scalars().first()
     return row
 
 
